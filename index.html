@@ -103,6 +103,7 @@ input,select,textarea{font-family:inherit;font-size:15px;}
 .app-header{
   position:sticky;top:0;z-index:40;
   background:var(--bg);
+  max-width:520px;margin:0 auto;
   padding:calc(12px + env(safe-area-inset-top)) 16px 10px;
   display:flex;align-items:center;justify-content:space-between;
   border-bottom:1px solid transparent;
@@ -216,8 +217,9 @@ input[type="date"]{direction:ltr;text-align:right;}
 .bottom-nav{
   position:fixed;bottom:0;right:0;left:0;height:var(--nav-total);
   background:var(--surface);border-top:1px solid var(--border);
-  display:flex;z-index:50;padding-bottom:var(--safe-b);
+  display:flex;justify-content:center;z-index:50;padding-bottom:var(--safe-b);
 }
+.nav-inner{display:flex;width:100%;max-width:520px;}
 .nav-btn{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
   background:none;border:none;color:var(--text-muted);cursor:pointer;padding:6px 2px;
@@ -309,7 +311,7 @@ canvas{display:block;width:100%;max-width:100%;}
 .switch input:checked + .track:before{left:3px;}
 
 .fab{
-  position:fixed;bottom:calc(var(--nav-total) + 16px);left:18px;width:56px;height:56px;border-radius:18px;
+  position:fixed;bottom:calc(var(--nav-total) + 16px);left:max(18px, calc(50vw - 242px));width:56px;height:56px;border-radius:18px;
   background:var(--primary);color:var(--on-primary);border:none;box-shadow:var(--shadow);
   display:flex;align-items:center;justify-content:center;z-index:45;
 }
@@ -356,12 +358,14 @@ canvas{display:block;width:100%;max-width:100%;}
 <button class="fab" id="fabAdd" style="display:none;"></button>
 
 <nav class="bottom-nav">
+ <div class="nav-inner">
   <button class="nav-btn" data-view="home"><span class="ic"></span><span>الرئيسية</span></button>
   <button class="nav-btn" data-view="expenses"><span class="ic"></span><span>المصروفات</span></button>
   <button class="nav-btn" data-view="health"><span class="ic"></span><span>الصحي</span></button>
   <button class="nav-btn" data-view="reserve"><span class="ic"></span><span>الاحتياط</span></button>
   <button class="nav-btn" data-view="home_loan"><span class="ic"></span><span>البيت</span></button>
   <button class="nav-btn" data-view="analytics"><span class="ic"></span><span>التحليلات</span></button>
+ </div>
 </nav>
 
 <div id="modalRoot"></div>
@@ -736,9 +740,13 @@ function drawLineArea(canvas,labels,values,color){
  values.forEach((v,i)=>{const x=xAt(i),y=yAt(v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
  ctx.strokeStyle=color; ctx.lineWidth=2.2; ctx.lineJoin='round'; ctx.stroke();
  values.forEach((v,i)=>{const x=xAt(i),y=yAt(v); ctx.beginPath();ctx.arc(x,y,2.6,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();});
- ctx.fillStyle=colorMuted(); ctx.font='10px Cairo'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+ ctx.fillStyle=colorMuted(); ctx.font='10px Cairo'; ctx.textBaseline='alphabetic';
  const step=Math.max(1,Math.ceil(n/6));
- labels.forEach((l,i)=>{ if(i%step===0||i===n-1) ctx.fillText(l, xAt(i), H-6); });
+ labels.forEach((l,i)=>{
+  if(!(i%step===0||i===n-1)) return;
+  ctx.textAlign = i===0 ? 'left' : (i===n-1 ? 'right' : 'center');
+  ctx.fillText(l, xAt(i), H-6);
+ });
 }
 function drawDualLines(canvas,labels,seriesA,seriesB,colorA,colorB){
  const W=canvas.clientWidth||300,H=190;
@@ -759,9 +767,11 @@ function drawDualLines(canvas,labels,seriesA,seriesB,colorA,colorB){
   vals.forEach((v,i)=>{const x=xAt(i),y=yAt(v); ctx.beginPath();ctx.arc(x,y,2.4,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();});
  }
  line(seriesA,colorA); line(seriesB,colorB);
- ctx.fillStyle=colorMuted(); ctx.font='10px Cairo'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
- const step=Math.max(1,Math.ceil(n/6));
- labels.forEach((l,i)=>{ if(i%step===0||i===n-1) ctx.fillText(l, xAt(i), H-8); });
+ ctx.fillStyle=colorMuted(); ctx.font='10px Cairo'; ctx.textBaseline='alphabetic';
+ labels.forEach((l,i)=>{
+  ctx.textAlign = i===0 ? 'left' : (i===n-1 ? 'right' : 'center');
+  ctx.fillText(l, xAt(i), H-8);
+ });
 }
 
 /* ==================== الرئيسية ==================== */
@@ -797,7 +807,7 @@ async function renderHome(){
  <div class="card">
   <div class="card-title">نسبة سداد البيت</div>
   <div class="progress"><div style="width:${payoffPct}%"></div></div>
-  <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12.5px;color:var(--text-muted);">
+  <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 10px;margin-top:8px;font-size:12.5px;color:var(--text-muted);">
    <span>${payoffPct.toFixed(1)}% مسدد</span><span>${fmtMoney(homeMeta.price)}</span>
   </div>
  </div>`:''}
@@ -1285,7 +1295,7 @@ async function renderHomeLoan(){
  <div class="card">
   <div class="card-title">التقدّم في السداد</div>
   <div class="progress"><div style="width:${pct}%"></div></div>
-  <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12.5px;color:var(--text-muted);">
+  <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 10px;margin-top:8px;font-size:12.5px;color:var(--text-muted);">
    <span>${pct.toFixed(1)}%</span><span>${etaText}</span>
   </div>
   <div class="kpi-grid" style="margin-top:12px;">
@@ -1433,7 +1443,7 @@ async function renderAnalytics(){
   const weeks=[[1,7],[8,14],[15,21],[22,28],[29,dim]].filter(w=>w[0]<=dim);
   weeks.forEach((w,i)=>{
    const from=`${a.month}-${pad2(w[0])}`, to=`${a.month}-${pad2(w[1])}`;
-   const sum=periodExpenses.filter(e=>e.date>=from && e.date<=to).reduce((s,e)=>s+e.amount,0);
+   const sum=periodExpenses.filter(e=>e.date>=from && e.date<=to && e.category!=='fixed').reduce((s,e)=>s+e.amount,0);
    weekLabels.push('أسبوع '+(i+1)); weekValues.push(sum);
   });
  }
@@ -1484,7 +1494,7 @@ async function renderAnalytics(){
  ${catData.length?`<div class="card"><div class="card-title">توزيع المصروف حسب التصنيف</div><canvas id="anaPie" height="220"></canvas>
  <div class="legend">${catData.map(d=>`<div class="legend-item"><span class="legend-dot" style="background:${d.color}"></span><b>${d.label}</b> ${periodTotal>0?((d.value/periodTotal)*100).toFixed(0):0}% · ${fmtNum(d.value)}</div>`).join('')}</div></div>`:''}
 
- ${weekLabels.length?`<div class="card"><div class="card-title">التوزيع الأسبوعي للمصروف</div><canvas id="anaWeekly" height="180"></canvas></div>`:''}
+ ${weekLabels.length?`<div class="card"><div class="card-title">التوزيع الأسبوعي للمصروف (بدون الثوابت الشهرية)</div><canvas id="anaWeekly" height="180"></canvas></div>`:''}
 
  <div class="card"><div class="card-title">الدخل مقابل المصروف (آخر 12 شهرًا)</div>
   <canvas id="anaTrend" height="190"></canvas>
