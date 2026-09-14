@@ -54,6 +54,8 @@
   --radius:16px;
   --radius-sm:10px;
   --nav-h:66px;
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --nav-total:calc(var(--nav-h) + var(--safe-b));
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){
@@ -90,7 +92,7 @@ body{
   line-height:1.6;
   overflow-x:hidden;
   min-height:100vh;
-  padding-bottom:calc(var(--nav-h) + 14px);
+  padding-bottom:calc(var(--nav-total) + 14px);
 }
 h1,h2,h3,h4{margin:0;font-weight:700;}
 p{margin:0;}
@@ -122,7 +124,7 @@ input,select,textarea{font-family:inherit;font-size:15px;}
 .icon-btn:active{transform:scale(.94);}
 .icon-btn svg{width:19px;height:19px;}
 
-main#app{padding:0 16px 96px;max-width:520px;margin:0 auto;}
+main#app{padding:0 16px calc(var(--nav-total) + 30px);max-width:520px;margin:0 auto;}
 
 .card{
   background:var(--surface);
@@ -212,9 +214,9 @@ input[type="date"]{direction:ltr;text-align:right;}
 .progress > div{height:100%;background:var(--primary);border-radius:6px;transition:width .3s;}
 
 .bottom-nav{
-  position:fixed;bottom:0;right:0;left:0;height:var(--nav-h);
+  position:fixed;bottom:0;right:0;left:0;height:var(--nav-total);
   background:var(--surface);border-top:1px solid var(--border);
-  display:flex;z-index:50;padding-bottom:env(safe-area-inset-bottom);
+  display:flex;z-index:50;padding-bottom:var(--safe-b);
 }
 .nav-btn{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
@@ -226,6 +228,7 @@ input[type="date"]{direction:ltr;text-align:right;}
 
 .sheet-overlay{
   position:fixed;inset:0;background:rgba(10,15,14,.45);z-index:100;
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
   display:flex;align-items:flex-end;justify-content:center;
   animation:fadeIn .15s ease;
 }
@@ -247,7 +250,7 @@ input[type="date"]{direction:ltr;text-align:right;}
 .info-banner svg{width:18px;height:18px;flex-shrink:0;margin-top:1px;}
 
 .toast{
-  position:fixed;bottom:calc(var(--nav-h) + 16px);left:50%;transform:translateX(-50%);
+  position:fixed;bottom:calc(var(--nav-total) + 16px);left:50%;transform:translateX(-50%);
   background:var(--text);color:var(--bg);padding:10px 18px;border-radius:999px;font-size:13.5px;
   z-index:200;box-shadow:var(--shadow);opacity:0;transition:opacity .2s, transform .2s;pointer-events:none;
 }
@@ -264,7 +267,7 @@ input[type="date"]{direction:ltr;text-align:right;}
 .cat-row .pct{font-size:12.5px;color:var(--text-muted);width:40px;text-align:left;}
 .cat-row .amt{font-size:13px;font-weight:700;width:76px;text-align:left;}
 
-canvas{max-width:100%;}
+canvas{display:block;width:100%;max-width:100%;}
 
 .lock-screen{
   position:fixed;inset:0;background:var(--bg);z-index:1000;
@@ -306,7 +309,7 @@ canvas{max-width:100%;}
 .switch input:checked + .track:before{left:3px;}
 
 .fab{
-  position:fixed;bottom:calc(var(--nav-h) + 16px);left:18px;width:56px;height:56px;border-radius:18px;
+  position:fixed;bottom:calc(var(--nav-total) + 16px);left:18px;width:56px;height:56px;border-radius:18px;
   background:var(--primary);color:var(--on-primary);border:none;box-shadow:var(--shadow);
   display:flex;align-items:center;justify-content:center;z-index:45;
 }
@@ -355,8 +358,8 @@ canvas{max-width:100%;}
 <nav class="bottom-nav">
   <button class="nav-btn" data-view="home"><span class="ic"></span><span>الرئيسية</span></button>
   <button class="nav-btn" data-view="expenses"><span class="ic"></span><span>المصروفات</span></button>
-  <button class="nav-btn" data-view="reserve"><span class="ic"></span><span>الاحتياط</span></button>
   <button class="nav-btn" data-view="health"><span class="ic"></span><span>الصحي</span></button>
+  <button class="nav-btn" data-view="reserve"><span class="ic"></span><span>الاحتياط</span></button>
   <button class="nav-btn" data-view="home_loan"><span class="ic"></span><span>البيت</span></button>
   <button class="nav-btn" data-view="analytics"><span class="ic"></span><span>التحليلات</span></button>
 </nav>
@@ -522,24 +525,29 @@ async function setIncomeForMonth(mk,amount){return DBX.put('income',{month:mk,am
 async function reserveBalance(){const t=await DBX.all('reserveTx');return t.reduce((s,x)=>s+(x.type==='deposit'?x.amount:-x.amount),0);}
 async function healthBalance(){const t=await DBX.all('healthTx');return t.reduce((s,x)=>s+(x.type==='withdrawal'?-x.amount:x.amount),0);}
 
-/* صيانة تلقائية: إضافة الصندوق الصحي الشهرية + ترحيل المتبقي (كلاهما اختياري/مشروط) */
-async function runMaintenance(){
+/* إضافة الصندوق الصحي الشهرية التلقائية: تُستدعى عند الإقلاع وأيضًا فور حفظ/تغيير المبلغ الشهري حتى لا تنتظر إعادة تحميل الصفحة */
+async function processHealthMonthly(){
  const cmk=currentMonthKey();
  const healthMonthly=await getSetting('healthMonthly',0);
  let lastH=await getSetting('health_lastMonth',null);
- if(healthMonthly>0){
-  if(!lastH){
-   await DBX.add('healthTx',{type:'auto',amount:healthMonthly,date:todayStr(),note:'إضافة شهرية تلقائية'});
-   await setSetting('health_lastMonth',cmk);
-  }else{
-   let m=lastH;
-   while(m<cmk){
-    m=addMonthKey(m,1);
-    await DBX.add('healthTx',{type:'auto',amount:healthMonthly,date:firstDayOfMonth(m),note:'إضافة شهرية تلقائية'});
-    await setSetting('health_lastMonth',m);
-   }
+ if(healthMonthly<=0) return;
+ if(!lastH){
+  await DBX.add('healthTx',{type:'auto',amount:healthMonthly,date:todayStr(),note:'إضافة شهرية تلقائية'});
+  await setSetting('health_lastMonth',cmk);
+ }else{
+  let m=lastH;
+  while(m<cmk){
+   m=addMonthKey(m,1);
+   await DBX.add('healthTx',{type:'auto',amount:healthMonthly,date:firstDayOfMonth(m),note:'إضافة شهرية تلقائية'});
+   await setSetting('health_lastMonth',m);
   }
  }
+}
+
+/* صيانة تلقائية: إضافة الصندوق الصحي الشهرية + ترحيل المتبقي (كلاهما اختياري/مشروط) */
+async function runMaintenance(){
+ const cmk=currentMonthKey();
+ await processHealthMonthly();
  const rolloverOn=await getSetting('rolloverEnabled',false);
  if(rolloverOn){
   let lastR=await getSetting('rollover_lastMonth',null);
@@ -604,14 +612,31 @@ function bindViewEvents(){
 }
 
 /* ==================== نافذة منبثقة عامة + تنبيه ==================== */
+let _savedScrollY=0;
+function lockBodyScroll(){
+ _savedScrollY=window.scrollY;
+ document.body.style.position='fixed';
+ document.body.style.top=`-${_savedScrollY}px`;
+ document.body.style.left='0';
+ document.body.style.right='0';
+}
+function unlockBodyScroll(){
+ document.body.style.position='';
+ document.body.style.top='';
+ document.body.style.left='';
+ document.body.style.right='';
+ window.scrollTo(0,_savedScrollY);
+}
 function openModal(innerHtml){
  const root=document.getElementById('modalRoot');
+ const alreadyOpen=!!root.querySelector('.sheet-overlay');
  root.innerHTML=`<div class="sheet-overlay" id="sheetOverlay"><div class="sheet">${innerHtml}</div></div>`;
  root.querySelector('#sheetOverlay').addEventListener('click',(e)=>{ if(e.target.id==='sheetOverlay') closeModal(); });
  root.querySelector('[data-close]')?.addEventListener('click', closeModal);
  wireAmountInputs(root);
+ if(!alreadyOpen) lockBodyScroll();
 }
-function closeModal(){document.getElementById('modalRoot').innerHTML='';}
+function closeModal(){ document.getElementById('modalRoot').innerHTML=''; unlockBodyScroll(); }
 let toastTimer;
 function toast(msg){
  const el=document.getElementById('toast');
@@ -682,7 +707,7 @@ function drawBars(canvas,labels,values,colors){
  const gap=10;
  const barW=(W-gap*(n+1))/n;
  for(let i=0;i<n;i++){
-  const x=W-gap-(i+1)*barW-i*gap;
+  const x=gap+i*(barW+gap);
   const h=values[i]/max*plotH;
   const y=padTop+(plotH-h);
   ctx.fillStyle=Array.isArray(colors)?colors[i]:colors;
@@ -701,7 +726,7 @@ function drawLineArea(canvas,labels,values,color){
  const max=Math.max(...values,1), min=Math.min(...values,0);
  const padTop=14,padBottom=24,padSide=8;
  const plotW=W-padSide*2, plotH=H-padTop-padBottom;
- const xAt=i=>W-padSide-(n<=1?0:(i/(n-1))*plotW);
+ const xAt=i=>padSide+(n<=1?0:(i/(n-1))*plotW);
  const yAt=v=>padTop+(max===min?plotH/2:(max-v)/(max-min)*plotH);
  ctx.beginPath();
  values.forEach((v,i)=>{const x=xAt(i),y=yAt(v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
@@ -725,7 +750,7 @@ function drawDualLines(canvas,labels,seriesA,seriesB,colorA,colorB){
  const max=Math.max(...all,1), min=Math.min(...all,0);
  const padTop=14,padBottom=24,padSide=10;
  const plotW=W-padSide*2, plotH=H-padTop-padBottom;
- const xAt=i=>W-padSide-(n<=1?0:(i/(n-1))*plotW);
+ const xAt=i=>padSide+(n<=1?0:(i/(n-1))*plotW);
  const yAt=v=>padTop+(max===min?plotH/2:(max-v)/(max-min)*plotH);
  function line(vals,color){
   ctx.beginPath();
@@ -908,9 +933,12 @@ function openExpenseForm(existing){
   const isDoctor=category==='doctor';
   let linkedHealthTxId=isEdit?existing.linkedHealthTxId:undefined;
   if(isDoctor){
-   const healthRec={type:'withdrawal',amount,date,note:'خصم تلقائي - '+(note||'دكتور وعلاج'),autoFromExpense:true};
-   if(linkedHealthTxId){ await DBX.put('healthTx',{...healthRec,id:linkedHealthTxId}); }
-   else { linkedHealthTxId=await DBX.add('healthTx',healthRec); }
+   if(linkedHealthTxId){
+    const existingHealthTx=await DBX.get('healthTx',linkedHealthTxId);
+    await DBX.put('healthTx',{...(existingHealthTx||{}),id:linkedHealthTxId,type:'withdrawal',amount,date,note:'خصم تلقائي - '+(note||'دكتور وعلاج')});
+   }else{
+    linkedHealthTxId=await DBX.add('healthTx',{type:'withdrawal',amount,date,note:'خصم تلقائي - '+(note||'دكتور وعلاج'),autoFromExpense:true});
+   }
    rec.linkedHealthTxId=linkedHealthTxId;
   } else if(wasDoctor && linkedHealthTxId){
    await DBX.del('healthTx',linkedHealthTxId);
@@ -1071,7 +1099,7 @@ async function renderHealth(){
  const balance=txs.reduce((s,t)=>s+(t.type==='withdrawal'?-t.amount:t.amount),0);
  const term=(state.healthSearch||'').trim();
  let filtered=txs;
- if(state.healthFilter==='auto') filtered=filtered.filter(t=>t.type==='auto');
+ if(state.healthFilter==='deposit') filtered=filtered.filter(t=>t.type!=='withdrawal');
  if(state.healthFilter==='withdrawal') filtered=filtered.filter(t=>t.type==='withdrawal');
  if(term) filtered=filtered.filter(t=>(t.note||'').includes(term)||String(t.amount).includes(term)||t.date.includes(term));
 
@@ -1101,7 +1129,7 @@ async function renderHealth(){
  <div class="search-input-wrap">${ic('search',18)}<input type="text" id="healthSearchInput" placeholder="بحث في السجل" value="${escapeHtml(term)}"></div>
  <div class="chip-row">
   <div class="chip ${state.healthFilter==='all'?'active':''}" data-f="all">الكل</div>
-  <div class="chip ${state.healthFilter==='auto'?'active':''}" data-f="auto">إضافات تلقائية</div>
+  <div class="chip ${state.healthFilter==='deposit'?'active':''}" data-f="deposit">إضافات</div>
   <div class="chip ${state.healthFilter==='withdrawal'?'active':''}" data-f="withdrawal">سحوبات</div>
  </div>
 
@@ -1111,12 +1139,16 @@ async function renderHealth(){
 }
 function healthRow(t){
  const isW=t.type==='withdrawal';
- const isLinked=!!t.autoFromExpense;
- const label=isLinked?'خصم تلقائي (دكتور وعلاج)':(isW?'سحب':'إضافة شهرية تلقائية');
- const badgeClass=(!isW||isLinked)?'auto':'manual';
- const badgeText=isLinked?'مرتبط بمصروف':(!isW?'تلقائي':'يدوي');
+ const isAuto=t.type==='auto';
+ const isLinked=!!t.autoFromExpense || !!t.linkedExpenseId;
+ let label;
+ if(isAuto) label='إضافة شهرية تلقائية';
+ else if(t.type==='deposit') label='إضافة يدوية';
+ else label=isLinked?'خصم (دكتور وعلاج)':'سحب';
+ const badgeClass=(!isW)?'auto':(isLinked?'auto':'manual');
+ const badgeText=isAuto?'تلقائي':(isW?(isLinked?'مرتبط بمصروف':'يدوي'):'يدوي');
  return `<div class="tx-item" data-id="${t.id}">
-  <div class="tx-icon" style="background:${isW?'var(--danger)':'var(--primary)'}">${ic(isW?(isLinked?'stethoscope':'trash'):'check',18)}</div>
+  <div class="tx-icon" style="background:${isW?'var(--danger)':'var(--primary)'}">${ic(isW?(isLinked?'stethoscope':'trash'):'plus',18)}</div>
   <div class="tx-body"><div class="t1"><span>${label} <span class="badge ${badgeClass}">${badgeText}</span></span></div><div class="t2">${t.note?escapeHtml(t.note)+' · ':''}${t.date}</div></div>
   <div class="tx-amt ${isW?'neg':'pos'}">${isW?'-':'+'}${fmtNum(t.amount)}</div>
  </div>`;
@@ -1126,9 +1158,9 @@ function bindHealth(){
  if(monthlyEl){
   const persistMonthly=()=>setSetting('healthMonthly', parseAmount(monthlyEl.value));
   monthlyEl.addEventListener('input', debounce(persistMonthly, 500));
-  monthlyEl.addEventListener('change', async ()=>{ await persistMonthly(); render(); });
+  monthlyEl.addEventListener('change', async ()=>{ await persistMonthly(); await processHealthMonthly(); render(); });
   document.getElementById('btnSaveHealthMonthly')?.addEventListener('click', async ()=>{
-   await persistMonthly(); toast('تم حفظ المبلغ الشهري'); render();
+   await persistMonthly(); await processHealthMonthly(); toast('تم حفظ المبلغ الشهري'); render();
   });
  }
  qsa('.chip[data-f]').forEach(c=>c.addEventListener('click',()=>{ state.healthFilter=c.dataset.f; render(); }));
@@ -1142,27 +1174,56 @@ function bindHealth(){
   openHealthEditForm(t);
  });
 }
-function openHealthWithdrawForm(){
+function openHealthTxForm(){
  openModal(`
   <div class="sheet-handle"></div>
-  <div class="sheet-header"><h3>سحب من الصندوق الصحي</h3><button class="icon-btn" data-close>${ic('close',18)}</button></div>
-  <div class="field"><label>المبلغ المسحوب</label><input type="number" data-amount id="hAmount" inputmode="decimal"></div>
-  ${dateFieldHtml('تاريخ السحب','hDate',todayStr())}
-  <div class="field"><label>السبب / التفاصيل</label><textarea id="hNote" placeholder="اسم العلاج أو الحالة"></textarea></div>
-  <button class="btn btn-primary" id="btnSaveH">سحب</button>
+  <div class="sheet-header"><h3>عملية جديدة بالصندوق الصحي</h3><button class="icon-btn" data-close>${ic('close',18)}</button></div>
+  <div class="chip-row" id="hTypeChips"><div class="chip" data-t="deposit">إضافة</div><div class="chip active" data-t="withdrawal">سحب</div></div>
+  <div id="hFormBody"></div>
  `);
- document.getElementById('btnSaveH').addEventListener('click', async ()=>{
-  const amount=parseAmount(document.getElementById('hAmount').value);
-  if(!amount||amount<=0){toast('أدخل مبلغًا صحيحًا');return;}
-  const bal=await healthBalance();
-  if(amount>bal && !confirm('المبلغ أكبر من رصيد الصندوق الحالي. هل تريد المتابعة؟')) return;
-  const date=document.getElementById('hDate').value||todayStr();
-  const note=document.getElementById('hNote').value.trim();
-  await DBX.add('healthTx',{type:'withdrawal',amount,date,note});
-  closeModal(); render(); toast('تم تسجيل السحب');
+ let type='withdrawal';
+ renderHForm();
+ document.getElementById('hTypeChips').addEventListener('click',(e)=>{
+  const c=e.target.closest('.chip'); if(!c) return;
+  type=c.dataset.t;
+  qsa('#hTypeChips .chip').forEach(x=>x.classList.toggle('active',x===c));
+  renderHForm();
  });
+ function renderHForm(){
+  document.getElementById('hFormBody').innerHTML= type==='deposit'?`
+   <div class="field"><label>المبلغ المضاف</label><input type="number" data-amount id="hAmount" inputmode="decimal"></div>
+   ${dateFieldHtml('تاريخ الإضافة','hDate',todayStr())}
+   <div class="field"><label>ملاحظة (اختياري)</label><input type="text" id="hNote"></div>
+   <button class="btn btn-primary" id="btnSaveH">إضافة</button>
+  `:`
+   <div class="field"><label>المبلغ المسحوب</label><input type="number" data-amount id="hAmount" inputmode="decimal"></div>
+   ${dateFieldHtml('تاريخ السحب','hDate',todayStr())}
+   <div class="field"><label>السبب / التفاصيل</label><textarea id="hNote" placeholder="اسم العلاج أو الحالة"></textarea></div>
+   <div class="info-banner">${ic('info',16)}<div>سيُسجَّل هذا السحب تلقائيًا كعملية مصروف بتصنيف "دكتور وعلاج" ضمن المصروفات الشهرية أيضًا.</div></div>
+   <button class="btn btn-primary" id="btnSaveH">سحب</button>
+  `;
+  wireAmountInput(document.getElementById('hAmount'));
+  document.getElementById('btnSaveH').addEventListener('click', async ()=>{
+   const amount=parseAmount(document.getElementById('hAmount').value);
+   if(!amount||amount<=0){toast('أدخل مبلغًا صحيحًا');return;}
+   const date=document.getElementById('hDate').value||todayStr();
+   const note=document.getElementById('hNote').value.trim();
+   if(type==='deposit'){
+    await DBX.add('healthTx',{type:'deposit',amount,date,note});
+    closeModal(); render(); toast('تمت الإضافة');
+   }else{
+    const bal=await healthBalance();
+    if(amount>bal && !confirm('المبلغ أكبر من رصيد الصندوق الحالي. هل تريد المتابعة؟')) return;
+    const healthId=await DBX.add('healthTx',{type:'withdrawal',amount,date,note});
+    const expenseId=await DBX.add('expenses',{amount,category:'doctor',date,note:note||'خصم من الصندوق الصحي',month:monthKeyOfDate(date),linkedHealthTxId:healthId});
+    await DBX.put('healthTx',{id:healthId,type:'withdrawal',amount,date,note,linkedExpenseId:expenseId});
+    closeModal(); render(); toast('تم تسجيل السحب');
+   }
+  });
+ }
 }
 function openHealthEditForm(t){
+ const canSyncExpense=!!t.linkedExpenseId;
  openModal(`
   <div class="sheet-handle"></div>
   <div class="sheet-header"><h3>تعديل السجل</h3><button class="icon-btn" data-close>${ic('close',18)}</button></div>
@@ -1170,6 +1231,7 @@ function openHealthEditForm(t){
   ${dateFieldHtml('التاريخ','ehDate',t.date)}
   <div class="field"><label>ملاحظة</label><textarea id="ehNote">${escapeHtml(t.note||'')}</textarea></div>
   ${t.autoFromExpense?`<div class="info-banner">${ic('info',16)}<div>هذه العملية مرتبطة تلقائيًا بمصروف من تصنيف "دكتور وعلاج". حذفها هنا لن يحذف المصروف الأصلي.</div></div>`:''}
+  ${canSyncExpense?`<div class="info-banner">${ic('info',16)}<div>تعديل أو حذف هذه العملية سيُحدّث أو يحذف المصروف المرتبط بها تلقائيًا بصفحة المصروفات الشهرية.</div></div>`:''}
   <div class="btn-block-row">
    <button class="btn btn-danger btn-icon" id="ehDel">${ic('trash',18)}</button>
    <button class="btn btn-primary" id="ehSave">حفظ</button>
@@ -1180,10 +1242,17 @@ function openHealthEditForm(t){
   const date=document.getElementById('ehDate').value||t.date;
   const note=document.getElementById('ehNote').value.trim();
   await DBX.put('healthTx',{...t,amount,date,note});
+  if(canSyncExpense){
+   const exp=await DBX.get('expenses', t.linkedExpenseId);
+   if(exp) await DBX.put('expenses',{...exp,amount,date,note:note||exp.note,month:monthKeyOfDate(date)});
+  }
   closeModal(); render(); toast('تم الحفظ');
  });
  document.getElementById('ehDel').addEventListener('click', async ()=>{
-  if(confirm('حذف هذا السجل؟'+(t.type==='auto'?' (إضافة تلقائية)':''))){ await DBX.del('healthTx',t.id); closeModal(); render(); toast('تم الحذف'); }
+  if(confirm('حذف هذا السجل؟'+(t.type==='auto'?' (إضافة تلقائية)':''))){
+   if(canSyncExpense) await DBX.del('expenses', t.linkedExpenseId);
+   await DBX.del('healthTx',t.id); closeModal(); render(); toast('تم الحذف');
+  }
  });
 }
 
@@ -1857,7 +1926,7 @@ function wireNav(){
  document.getElementById('fabAdd').addEventListener('click',()=>{
   if(state.view==='expenses') openExpenseForm();
   else if(state.view==='reserve') openReserveTxForm();
-  else if(state.view==='health') openHealthWithdrawForm();
+  else if(state.view==='health') openHealthTxForm();
   else if(state.view==='home_loan') openHomePaymentForm();
  });
 }
