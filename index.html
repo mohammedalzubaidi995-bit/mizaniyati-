@@ -665,7 +665,7 @@ function openModal(innerHtml){
  wireAmountInputs(root);
  if(!alreadyOpen) lockBodyScroll();
 }
-function closeModal(){ document.getElementById('modalRoot').innerHTML=''; unlockBodyScroll(); }
+function closeModal(){ document.getElementById('modalRoot').innerHTML=''; unlockBodyScroll(); render(); }
 let toastTimer;
 function toast(msg){
  const el=document.getElementById('toast');
@@ -1619,6 +1619,7 @@ async function openDebtorDetail(debtorId){
    }
    await DBX.add('debtPayments', rec);
    toast('تمت إضافة الدفعة');
+   render();
    openDebtorDetail(debtorId);
   });
  });
@@ -1650,6 +1651,7 @@ function openDebtPaymentEdit(debtor, p){
    if(rtx) await DBX.put('reserveTx',{...rtx,amount,date,note:'من '+debtor.name+(note?' - '+note:'')});
   }
   toast('تم الحفظ');
+  render();
   openDebtorDetail(debtor.id);
  });
  document.getElementById('epDel').addEventListener('click', async ()=>{
@@ -1657,6 +1659,7 @@ function openDebtPaymentEdit(debtor, p){
   if(p.linkedReserveTxId) await DBX.del('reserveTx', p.linkedReserveTxId);
   await DBX.del('debtPayments', p.id);
   toast('تم الحذف');
+  render();
   openDebtorDetail(debtor.id);
  });
 }
