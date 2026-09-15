@@ -187,6 +187,10 @@ input[type="date"]{direction:ltr;text-align:right;}
 }
 
 .tx-list{display:flex;flex-direction:column;gap:8px;}
+.day-group{margin-bottom:16px;}
+.day-group:last-child{margin-bottom:0;}
+.day-header{display:flex;justify-content:space-between;align-items:center;padding:2px 4px 8px;font-size:12.5px;font-weight:700;color:var(--text-muted);}
+.day-header .amt{color:var(--danger);font-weight:800;}
 .tx-item{
   display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);
   border-radius:var(--radius-sm);padding:10px 12px;cursor:pointer;
@@ -391,9 +395,15 @@ const DEFAULT_CATS=[
 const CUSTOM_CAT_ICONS=['bank','cart','cutlery','scissors','smoke','stethoscope','shirt','fuel','wrench','car','gift','dots'];
 let CATS=[...DEFAULT_CATS];
 async function loadCategories(){
- const custom=await getSetting('customCategories',[]);
- CATS=[...DEFAULT_CATS, ...custom];
+ let all=await getSetting('allCategories',null);
+ if(!all){
+  const legacyCustom=await getSetting('customCategories',[]);
+  all=[...DEFAULT_CATS, ...legacyCustom];
+  await setSetting('allCategories', all);
+ }
+ CATS=all;
 }
+async function saveCategories(){ await setSetting('allCategories', CATS); }
 const RESERVE_SOURCES=['مكافأة','هدية','دخل إضافي','بيع شيء','أخرى'];
 const RESERVE_REASONS=['طارئ عائلي','نقص في الميزانية الشهرية','صيانة','أخرى'];
 const MONTHS_AR=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
@@ -415,6 +425,9 @@ const ICONS={
  plus:'<path d="M12 5v14M5 12h14"/>',
  chevronLeft:'<path d="M14 6l-6 6 6 6"/>',
  chevronRight:'<path d="M10 6l6 6-6 6"/>',
+ arrowUp:'<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
+ arrowDown:'<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',
+ edit:'<path d="m4 20 1-4 11-11 3 3-11 11-4 1z"/><path d="M14 7l3 3"/>',
  trash:'<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M10 11v6M14 11v6"/>',
  uploadDoc:'<path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M12 12v6M9.5 14.5 12 12l2.5 2.5"/>',
  fileGeneric:'<path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/>',
@@ -579,6 +592,7 @@ async function runMaintenance(){
 const state={view:'home', expMonth:currentMonthKey(), expSearch:'', expCatFilter:'all', reserveFilter:'all', reserveSearch:'', healthFilter:'all', healthSearch:'', chartCache:{}, ana:null};
 const viewTitles={home:'الرئيسية',expenses:'المصروفات الشهرية',reserve:'مبلغ الاحتياط',health:'الصندوق الصحي',home_loan:'أقساط البيت',analytics:'التحليلات والإحصائيات'};
 let pendingFocusId=null;
+let pendingScrollRestore=null;
 
 async function navigate(view){
  state.view=view;
@@ -604,6 +618,11 @@ async function render(){
   const el=document.getElementById(pendingFocusId);
   if(el){ el.focus(); const v=el.value; el.value=''; el.value=v; }
   pendingFocusId=null;
+ }
+ if(pendingScrollRestore){
+  const el=document.getElementById(pendingScrollRestore.id);
+  if(el) el.scrollLeft=pendingScrollRestore.left;
+  pendingScrollRestore=null;
  }
 }
 function bindViewEvents(){
@@ -881,14 +900,31 @@ async function renderExpenses(){
  ${catFilter!=='all'?`<div class="info-banner" style="background:var(--surface-2);color:var(--text);"><div style="width:100%;display:flex;justify-content:space-between;"><span>إجمالي "${catInfo(catFilter).label}" لشهر ${monthLabel(mk)}</span><b>${fmtMoney(byCat[catFilter]||0)}</b></div></div>`:''}
 
  <div class="section-title">العمليات (${filtered.length})</div>
- <div class="tx-list" id="expList">${filtered.length?filtered.map(expenseRow).join(''):emptyState('لا توجد عمليات مطابقة')}</div>
+ <div id="expList">${filtered.length?expenseGroupsHtml(filtered):emptyState('لا توجد عمليات مطابقة')}</div>
  `;
 }
-function expenseRow(e){
+function dayHeaderLabel(dateStr){
+ const [,m,d]=dateStr.split('-').map(Number);
+ return Number(d)+' '+MONTHS_AR[m-1];
+}
+function expenseGroupsHtml(list){
+ const order=[], groups={};
+ list.forEach(e=>{ if(!groups[e.date]){ groups[e.date]=[]; order.push(e.date); } groups[e.date].push(e); });
+ return order.map(date=>{
+  const items=groups[date];
+  const total=items.reduce((s,e)=>s+e.amount,0);
+  return `<div class="day-group">
+   <div class="day-header"><span>${dayHeaderLabel(date)}</span><span class="amt">-${fmtNum(total)}</span></div>
+   <div class="tx-list">${items.map(e=>expenseRow(e,false)).join('')}</div>
+  </div>`;
+ }).join('');
+}
+function expenseRow(e, showDate){
  const cat=catInfo(e.category);
+ const t2 = showDate ? (e.date+(e.note?' · '+escapeHtml(e.note):'')) : escapeHtml(e.note||'');
  return `<div class="tx-item" data-id="${e.id}">
   <div class="tx-icon" style="background:${cat.color}">${ic(cat.icon,18)}</div>
-  <div class="tx-body"><div class="t1"><span>${cat.label}</span></div><div class="t2">${e.note?escapeHtml(e.note)+' · ':''}${e.date}</div></div>
+  <div class="tx-body"><div class="t1"><span>${cat.label}</span></div>${t2?`<div class="t2">${t2}</div>`:''}</div>
   <div class="tx-amt neg">-${fmtNum(e.amount)}</div>
  </div>`;
 }
@@ -908,7 +944,11 @@ function bindExpenses(){
  const bar=document.getElementById('cmpBar'); if(bar) drawBars(bar, state.chartCache.months.map(m=>MONTHS_EN[Number(m.split('-')[1])-1]), state.chartCache.monthTotals, colorPrimary());
  const searchEl=document.getElementById('expSearchInput');
  if(searchEl) searchEl.addEventListener('input', debounce(()=>{ state.expSearch=searchEl.value; pendingFocusId='expSearchInput'; render(); },300));
- document.getElementById('catChips')?.addEventListener('click',(e)=>{ const chip=e.target.closest('.chip'); if(!chip) return; state.expCatFilter=chip.dataset.cat; render(); });
+ document.getElementById('catChips')?.addEventListener('click',(e)=>{
+  const chip=e.target.closest('.chip'); if(!chip) return;
+  pendingScrollRestore={id:'catChips', left:document.getElementById('catChips').scrollLeft};
+  state.expCatFilter=chip.dataset.cat; render();
+ });
  document.getElementById('expList')?.addEventListener('click', async (e)=>{
   const item=e.target.closest('.tx-item'); if(!item) return;
   const exp=await DBX.get('expenses', Number(item.dataset.id));
@@ -1602,11 +1642,37 @@ async function runGlobalSearch(term){
 }
 
 /* ==================== الإعدادات ==================== */
+function categoriesListHtml(){
+ return CATS.map((c,i)=>`
+  <div class="cat-row">
+   <div class="dot" style="background:${c.color}"></div>
+   <div class="name">${escapeHtml(c.label)}</div>
+   <div style="display:flex;gap:4px;flex-shrink:0;">
+    <button class="icon-btn" data-cat-act="up" data-idx="${i}" style="width:30px;height:30px;" ${i===0?'disabled':''}>${ic('arrowUp',14)}</button>
+    <button class="icon-btn" data-cat-act="down" data-idx="${i}" style="width:30px;height:30px;" ${i===CATS.length-1?'disabled':''}>${ic('arrowDown',14)}</button>
+    <button class="icon-btn" data-cat-act="edit" data-idx="${i}" style="width:30px;height:30px;">${ic('edit',14)}</button>
+    ${c.id!=='other'?`<button class="icon-btn" data-cat-act="del" data-idx="${i}" style="width:30px;height:30px;">${ic('trash',14)}</button>`:''}
+   </div>
+  </div>
+ `).join('');
+}
+function categoryFormHtml(existing){
+ const label=existing?existing.label:'';
+ const color=existing?existing.color:'#5C7DB0';
+ const icon=existing?existing.icon:CUSTOM_CAT_ICONS[0];
+ return `
+  <div class="field" style="margin-top:10px;"><label>اسم التصنيف</label><input type="text" id="catFormLabel" value="${escapeHtml(label)}" placeholder="مثال: اشتراكات"></div>
+  <div class="field-row">
+   <div class="field"><label>اللون</label><input type="color" id="catFormColor" value="${color}" style="padding:4px;height:44px;"></div>
+   <div class="field"><label>الأيقونة</label><select id="catFormIcon">${CUSTOM_CAT_ICONS.map(i=>`<option value="${i}" ${i===icon?'selected':''}>${i}</option>`).join('')}</select></div>
+  </div>
+  <button class="btn btn-primary btn-sm" id="btnSaveCatForm" style="width:100%;">حفظ</button>
+ `;
+}
 async function openSettings(){
  const pinEnabled=await getSetting('pinEnabled',false);
  const rolloverEnabled=await getSetting('rolloverEnabled',false);
  const currency=await getSetting('currency','د.ع');
- const customCats=await getSetting('customCategories',[]);
 
  openModal(`
   <div class="sheet-handle"></div>
@@ -1631,10 +1697,7 @@ async function openSettings(){
 
   <div class="card">
    <div class="card-title">تصنيفات المصروفات</div>
-   ${customCats.length?customCats.map(c=>`
-    <div class="cat-row"><div class="dot" style="background:${c.color}"></div><div class="name">${c.label}</div>
-     <button class="icon-btn" data-del-cat="${c.id}" style="width:34px;height:34px;">${ic('trash',15)}</button>
-    </div>`).join(''):'<div class="tag-input-hint" style="margin:0 0 8px;">لا توجد تصنيفات إضافية بعد.</div>'}
+   <div id="catList">${categoriesListHtml()}</div>
    <button class="btn btn-soft btn-sm" id="btnAddCat" style="width:100%;margin-top:6px;">${ic('plus',15)} إضافة تصنيف جديد</button>
    <div id="addCatForm"></div>
   </div>
@@ -1669,30 +1732,39 @@ async function openSettings(){
  document.getElementById('btnImportBackup').addEventListener('click',()=>document.getElementById('importFileInput').click());
  document.getElementById('importFileInput').addEventListener('change', importBackupFile);
  document.getElementById('btnExportExcel').addEventListener('click', exportExcelReport);
- qsa('[data-del-cat]').forEach(b=>b.addEventListener('click', async ()=>{
-  if(!confirm('حذف هذا التصنيف؟ العمليات القديمة المسجلة به ستبقى محفوظة لكنه لن يظهر بعد الآن كخيار جديد.')) return;
-  const custom=await getSetting('customCategories',[]);
-  await setSetting('customCategories', custom.filter(c=>c.id!==b.dataset.delCat));
-  await loadCategories(); toast('تم الحذف'); openSettings();
- }));
+ document.getElementById('catList').addEventListener('click', async (e)=>{
+  const btn=e.target.closest('[data-cat-act]'); if(!btn||btn.disabled) return;
+  const idx=Number(btn.dataset.idx);
+  const act=btn.dataset.catAct;
+  if(act==='up'){
+   [CATS[idx-1],CATS[idx]]=[CATS[idx],CATS[idx-1]];
+   await saveCategories(); openSettings();
+  }else if(act==='down'){
+   [CATS[idx],CATS[idx+1]]=[CATS[idx+1],CATS[idx]];
+   await saveCategories(); openSettings();
+  }else if(act==='del'){
+   if(!confirm('حذف هذا التصنيف؟ العمليات القديمة المسجلة به ستبقى محفوظة لكنه لن يظهر بعد الآن كخيار جديد.')) return;
+   CATS.splice(idx,1);
+   await saveCategories(); toast('تم الحذف'); openSettings();
+  }else if(act==='edit'){
+   document.getElementById('addCatForm').innerHTML=categoryFormHtml(CATS[idx]);
+   document.getElementById('btnSaveCatForm').addEventListener('click', async ()=>{
+    const label=document.getElementById('catFormLabel').value.trim();
+    if(!label){ toast('أدخل اسم التصنيف'); return; }
+    CATS[idx]={...CATS[idx], label, color:document.getElementById('catFormColor').value, icon:document.getElementById('catFormIcon').value};
+    await saveCategories(); toast('تم الحفظ'); openSettings();
+   });
+  }
+ });
  document.getElementById('btnAddCat').addEventListener('click', ()=>{
-  document.getElementById('addCatForm').innerHTML=`
-   <div class="field" style="margin-top:10px;"><label>اسم التصنيف</label><input type="text" id="newCatLabel" placeholder="مثال: اشتراكات"></div>
-   <div class="field-row">
-    <div class="field"><label>اللون</label><input type="color" id="newCatColor" value="#5C7DB0" style="padding:4px;height:44px;"></div>
-    <div class="field"><label>الأيقونة</label><select id="newCatIcon">${CUSTOM_CAT_ICONS.map(i=>`<option value="${i}">${i}</option>`).join('')}</select></div>
-   </div>
-   <button class="btn btn-primary btn-sm" id="btnSaveCat" style="width:100%;">حفظ التصنيف</button>
-  `;
-  document.getElementById('btnSaveCat').addEventListener('click', async ()=>{
-   const label=document.getElementById('newCatLabel').value.trim();
+  document.getElementById('addCatForm').innerHTML=categoryFormHtml();
+  document.getElementById('btnSaveCatForm').addEventListener('click', async ()=>{
+   const label=document.getElementById('catFormLabel').value.trim();
    if(!label){ toast('أدخل اسم التصنيف'); return; }
-   const color=document.getElementById('newCatColor').value;
-   const icon=document.getElementById('newCatIcon').value;
-   const custom=await getSetting('customCategories',[]);
-   custom.push({id:'custom_'+Date.now(), label, color, icon});
-   await setSetting('customCategories', custom);
-   await loadCategories(); toast('تمت الإضافة'); openSettings();
+   const color=document.getElementById('catFormColor').value;
+   const icon=document.getElementById('catFormIcon').value;
+   CATS.push({id:'custom_'+Date.now(), label, color, icon});
+   await saveCategories(); toast('تمت الإضافة'); openSettings();
   });
  });
 }
@@ -1748,6 +1820,7 @@ async function importBackupFile(e){
    }
   }
   CURRENCY=await getSetting('currency','د.ع');
+  await loadCategories();
   toast('تم استيراد النسخة الاحتياطية بنجاح');
   closeModal();
   navigate(state.view);
