@@ -367,6 +367,7 @@ canvas{display:block;width:100%;max-width:100%;}
   <button class="nav-btn" data-view="expenses"><span class="ic"></span><span>المصروفات</span></button>
   <button class="nav-btn" data-view="health"><span class="ic"></span><span>الصحي</span></button>
   <button class="nav-btn" data-view="reserve"><span class="ic"></span><span>الاحتياط</span></button>
+  <button class="nav-btn" data-view="debts"><span class="ic"></span><span>الديون</span></button>
   <button class="nav-btn" data-view="home_loan"><span class="ic"></span><span>البيت</span></button>
   <button class="nav-btn" data-view="analytics"><span class="ic"></span><span>التحليلات</span></button>
  </div>
@@ -404,8 +405,8 @@ async function loadCategories(){
  CATS=all;
 }
 async function saveCategories(){ await setSetting('allCategories', CATS); }
-const RESERVE_SOURCES=['مكافأة','هدية','دخل إضافي','بيع شيء','أخرى'];
-const RESERVE_REASONS=['طارئ عائلي','نقص في الميزانية الشهرية','صيانة','أخرى'];
+const RESERVE_SOURCES=['مكافأة','هدية','دخل إضافي','تحصيل دين','بيع شيء','أخرى'];
+const RESERVE_REASONS=['طارئ عائلي','نقص في الميزانية الشهرية','صيانة','إقراض لشخص','أخرى'];
 const MONTHS_AR=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 const MONTHS_EN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let CURRENCY='د.ع';
@@ -425,6 +426,7 @@ const ICONS={
  plus:'<path d="M12 5v14M5 12h14"/>',
  chevronLeft:'<path d="M14 6l-6 6 6 6"/>',
  chevronRight:'<path d="M10 6l6 6-6 6"/>',
+ debts:'<circle cx="9" cy="8" r="3"/><circle cx="17" cy="10" r="2.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M13.3 14.3c1.9.4 3.3 2 3.7 3.9"/>',
  arrowUp:'<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
  arrowDown:'<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',
  edit:'<path d="m4 20 1-4 11-11 3 3-11 11-4 1z"/><path d="M14 7l3 3"/>',
@@ -501,7 +503,7 @@ function wireAmountInputs(root){ (root||document).querySelectorAll('[data-amount
 function parseAmount(str){ return parseFloat(String(str||'').replace(/,/g,''))||0; }
 
 /* ==================== قاعدة البيانات (IndexedDB) ==================== */
-const DB_NAME='mizaniyati_db', DB_VER=1;
+const DB_NAME='mizaniyati_db', DB_VER=2;
 let DB;
 function openDB(){
  return new Promise((resolve,reject)=>{
@@ -516,6 +518,8 @@ function openDB(){
    if(!d.objectStoreNames.contains('homePayments')){const s=d.createObjectStore('homePayments',{keyPath:'id',autoIncrement:true});s.createIndex('date','date');}
    if(!d.objectStoreNames.contains('homeDocs')) d.createObjectStore('homeDocs',{keyPath:'id',autoIncrement:true});
    if(!d.objectStoreNames.contains('settings')) d.createObjectStore('settings',{keyPath:'key'});
+   if(!d.objectStoreNames.contains('debtors')) d.createObjectStore('debtors',{keyPath:'id',autoIncrement:true});
+   if(!d.objectStoreNames.contains('debtPayments')){const s=d.createObjectStore('debtPayments',{keyPath:'id',autoIncrement:true});s.createIndex('debtorId','debtorId');}
   };
   r.onsuccess=e=>{DB=e.target.result;resolve(DB);};
   r.onerror=e=>reject(e.target.error);
@@ -589,8 +593,8 @@ async function runMaintenance(){
 }
 
 /* ==================== حالة التطبيق والتصفح ==================== */
-const state={view:'home', expMonth:currentMonthKey(), expSearch:'', expCatFilter:'all', reserveFilter:'all', reserveSearch:'', healthFilter:'all', healthSearch:'', chartCache:{}, ana:null};
-const viewTitles={home:'الرئيسية',expenses:'المصروفات الشهرية',reserve:'مبلغ الاحتياط',health:'الصندوق الصحي',home_loan:'أقساط البيت',analytics:'التحليلات والإحصائيات'};
+const state={view:'home', expMonth:currentMonthKey(), expSearch:'', expCatFilter:'all', reserveFilter:'all', reserveSearch:'', healthFilter:'all', healthSearch:'', debtsSearch:'', debtsFilter:'all', chartCache:{}, ana:null};
+const viewTitles={home:'الرئيسية',expenses:'المصروفات الشهرية',reserve:'مبلغ الاحتياط',health:'الصندوق الصحي',home_loan:'أقساط البيت',debts:'الديون المستحقة',analytics:'التحليلات والإحصائيات'};
 let pendingFocusId=null;
 let pendingScrollRestore=null;
 
@@ -598,7 +602,7 @@ async function navigate(view){
  state.view=view;
  document.getElementById('headerTitle').textContent=viewTitles[view];
  qsa('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
- document.getElementById('fabAdd').style.display=(view==='expenses'||view==='reserve'||view==='health'||view==='home_loan')?'flex':'none';
+ document.getElementById('fabAdd').style.display=(view==='expenses'||view==='reserve'||view==='health'||view==='home_loan'||view==='debts')?'flex':'none';
  await render();
  window.scrollTo(0,0);
 }
@@ -610,6 +614,7 @@ async function render(){
  else if(state.view==='reserve') html=await renderReserve();
  else if(state.view==='health') html=await renderHealth();
  else if(state.view==='home_loan') html=await renderHomeLoan();
+ else if(state.view==='debts') html=await renderDebts();
  else if(state.view==='analytics') html=await renderAnalytics();
  app.innerHTML=html;
  wireAmountInputs(app);
@@ -631,6 +636,7 @@ function bindViewEvents(){
  else if(state.view==='reserve') bindReserve();
  else if(state.view==='health') bindHealth();
  else if(state.view==='home_loan') bindHomeLoan();
+ else if(state.view==='debts') bindDebts();
  else if(state.view==='analytics') bindAnalytics();
 }
 
@@ -1435,6 +1441,226 @@ function openHomePaymentForm(existing){
  });
 }
 
+/* ==================== الديون المستحقة ==================== */
+async function deleteDebtorCascade(id){
+ const payments=(await DBX.all('debtPayments')).filter(p=>p.debtorId===id);
+ for(const p of payments){ if(p.linkedReserveTxId) await DBX.del('reserveTx',p.linkedReserveTxId); await DBX.del('debtPayments',p.id); }
+ await DBX.del('debtors', id);
+}
+async function renderDebts(){
+ const debtors=await DBX.all('debtors');
+ const allPayments=await DBX.all('debtPayments');
+ const withStats=debtors.map(d=>{
+  const paid=allPayments.filter(p=>p.debtorId===d.id).reduce((s,p)=>s+p.amount,0);
+  const remaining=Math.max(0, d.totalAmount-paid);
+  return {...d, paid, remaining};
+ });
+
+ const term=(state.debtsSearch||'').trim();
+ const filter=state.debtsFilter||'all';
+ let filtered=withStats;
+ if(filter==='open') filtered=filtered.filter(d=>d.remaining>0);
+ if(filter==='done') filtered=filtered.filter(d=>d.remaining<=0);
+ if(term) filtered=filtered.filter(d=>d.name.includes(term)||(d.note||'').includes(term));
+
+ filtered=[...filtered].sort((a,b)=>{
+  const aDone=a.remaining<=0, bDone=b.remaining<=0;
+  if(aDone!==bDone) return aDone?1:-1;
+  return a.debtDate.localeCompare(b.debtDate);
+ });
+
+ const totalDebt=withStats.reduce((s,d)=>s+d.totalAmount,0);
+ const totalPaid=withStats.reduce((s,d)=>s+d.paid,0);
+ const totalRemaining=withStats.reduce((s,d)=>s+d.remaining,0);
+ const activeCount=withStats.filter(d=>d.remaining>0).length;
+
+ return `
+ <div class="info-banner">${ic('info',16)}<div>هذي الصفحة لمتابعة الديون المستحقة لك فقط. عند تسجيل دفعة سداد تكدر تختار إضافتها تلقائيًا لرصيد الاحتياط، وإذا أقرضت شخصًا مبلغًا من الاحتياط سجّله كسحب هناك ثم أضفه هنا كمدين جديد.</div></div>
+
+ <div class="kpi-grid">
+  <div class="kpi"><div class="lbl">إجمالي الديون</div><div class="val">${fmtMoney(totalDebt)}</div></div>
+  <div class="kpi"><div class="lbl">إجمالي المسدد</div><div class="val pos">${fmtMoney(totalPaid)}</div></div>
+  <div class="kpi"><div class="lbl">إجمالي المتبقي</div><div class="val ${totalRemaining>0?'neg':'pos'}">${fmtMoney(totalRemaining)}</div></div>
+  <div class="kpi"><div class="lbl">مدينون نشطون</div><div class="val">${activeCount}</div></div>
+ </div>
+
+ <div class="search-input-wrap">${ic('search',18)}<input type="text" id="debtsSearchInput" placeholder="بحث بالاسم" value="${escapeHtml(term)}"></div>
+ <div class="chip-row">
+  <div class="chip ${filter==='all'?'active':''}" data-f="all">الكل</div>
+  <div class="chip ${filter==='open'?'active':''}" data-f="open">متبقي</div>
+  <div class="chip ${filter==='done'?'active':''}" data-f="done">مسدد بالكامل</div>
+ </div>
+
+ <div class="section-title">المدينون (${filtered.length})</div>
+ <div class="tx-list" id="debtorsList">${filtered.length?filtered.map(debtorRow).join(''):emptyState('لا يوجد مدينون بعد')}</div>
+ `;
+}
+function debtorRow(d){
+ const done=d.remaining<=0;
+ return `<div class="tx-item" data-id="${d.id}">
+  <div class="tx-icon" style="background:${done?'var(--success)':'var(--warning)'}">${ic('debts',18)}</div>
+  <div class="tx-body"><div class="t1"><span>${escapeHtml(d.name)}</span></div><div class="t2">${d.debtDate}${d.note?' · '+escapeHtml(d.note):''}</div></div>
+  <div class="tx-amt ${done?'pos':'neg'}">${done?'مسدد بالكامل':fmtNum(d.remaining)}</div>
+ </div>`;
+}
+function bindDebts(){
+ document.getElementById('debtorsList')?.addEventListener('click', async (e)=>{
+  const item=e.target.closest('.tx-item'); if(!item) return;
+  openDebtorDetail(Number(item.dataset.id));
+ });
+ qsa('.chip[data-f]').forEach(c=>c.addEventListener('click',()=>{ state.debtsFilter=c.dataset.f; render(); }));
+ const si=document.getElementById('debtsSearchInput');
+ if(si) si.addEventListener('input', debounce(()=>{ state.debtsSearch=si.value; pendingFocusId='debtsSearchInput'; render(); },300));
+}
+function openDebtorForm(existing){
+ const isEdit=!!existing;
+ openModal(`
+  <div class="sheet-handle"></div>
+  <div class="sheet-header"><h3>${isEdit?'تعديل بيانات المدين':'إضافة مدين جديد'}</h3><button class="icon-btn" data-close>${ic('close',18)}</button></div>
+  <div class="field"><label>الاسم</label><input type="text" id="dName" value="${isEdit?escapeHtml(existing.name):''}" placeholder="اسم الشخص"></div>
+  <div class="field"><label>المبلغ الكلي للدين</label><input type="number" data-amount id="dAmount" value="${isEdit?existing.totalAmount:''}" inputmode="decimal"></div>
+  ${dateFieldHtml('تاريخ الدين','dDate', isEdit?existing.debtDate:todayStr())}
+  <div class="field"><label>ملاحظة (اختياري)</label><input type="text" id="dNote" value="${isEdit?escapeHtml(existing.note||''):''}" placeholder="سبب الدين أو أي تفاصيل"></div>
+  <div class="btn-block-row">
+   ${isEdit?`<button class="btn btn-danger btn-icon" id="btnDelD">${ic('trash',18)}</button>`:''}
+   <button class="btn btn-primary" id="btnSaveD">${isEdit?'حفظ':'إضافة'}</button>
+  </div>
+ `);
+ document.getElementById('btnSaveD').addEventListener('click', async ()=>{
+  const name=document.getElementById('dName').value.trim();
+  if(!name){ toast('أدخل اسم الشخص'); return; }
+  const totalAmount=parseAmount(document.getElementById('dAmount').value);
+  if(!totalAmount||totalAmount<=0){ toast('أدخل مبلغًا صحيحًا'); return; }
+  const debtDate=document.getElementById('dDate').value||todayStr();
+  const note=document.getElementById('dNote').value.trim();
+  const rec={name,totalAmount,debtDate,note};
+  if(isEdit){ rec.id=existing.id; await DBX.put('debtors',rec); toast('تم الحفظ'); }
+  else{ await DBX.add('debtors',rec); toast('تمت الإضافة'); }
+  closeModal(); render();
+ });
+ const delBtn=document.getElementById('btnDelD');
+ if(delBtn) delBtn.addEventListener('click', async ()=>{
+  if(!confirm('حذف هذا المدين وكل سجل دفعاته؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+  await deleteDebtorCascade(existing.id);
+  closeModal(); render(); toast('تم الحذف');
+ });
+}
+async function openDebtorDetail(debtorId){
+ const debtor=await DBX.get('debtors', debtorId);
+ if(!debtor){ closeModal(); return; }
+ const payments=(await DBX.all('debtPayments')).filter(p=>p.debtorId===debtorId).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+ const paid=payments.reduce((s,p)=>s+p.amount,0);
+ const remaining=Math.max(0, debtor.totalAmount-paid);
+ const pct=debtor.totalAmount>0?Math.min(100, paid/debtor.totalAmount*100):0;
+
+ openModal(`
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+   <h3>${escapeHtml(debtor.name)}</h3>
+   <div style="display:flex;gap:6px;">
+    <button class="icon-btn" id="btnEditDebtor" style="width:36px;height:36px;">${ic('edit',15)}</button>
+    <button class="icon-btn" id="btnDelDebtor" style="width:36px;height:36px;">${ic('trash',15)}</button>
+    <button class="icon-btn" data-close style="width:36px;height:36px;">${ic('close',16)}</button>
+   </div>
+  </div>
+
+  <div class="card">
+   <div class="kpi-grid" style="margin-bottom:0;">
+    <div class="kpi"><div class="lbl">المبلغ الكلي</div><div class="val">${fmtMoney(debtor.totalAmount)}</div></div>
+    <div class="kpi"><div class="lbl">المتبقي</div><div class="val ${remaining>0?'neg':'pos'}">${fmtMoney(remaining)}</div></div>
+   </div>
+   <div class="progress" style="margin-top:12px;"><div style="width:${pct}%"></div></div>
+   <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 10px;margin-top:8px;font-size:12.5px;color:var(--text-muted);">
+    <span>تاريخ الدين: ${debtor.debtDate}</span><span>${pct.toFixed(0)}% مسدد</span>
+   </div>
+   ${debtor.note?`<div class="tag-input-hint" style="margin-top:8px;margin-bottom:0;">${escapeHtml(debtor.note)}</div>`:''}
+  </div>
+
+  <button class="btn btn-soft btn-sm" id="btnAddPayment" style="width:100%;">${ic('plus',15)} إضافة دفعة سداد</button>
+  <div id="addPaymentForm"></div>
+
+  <div class="section-title" style="margin-top:16px;">سجل الدفعات (${payments.length})</div>
+  <div class="tx-list">${payments.length?payments.map(p=>`
+   <div class="tx-item" data-pay-id="${p.id}">
+    <div class="tx-icon" style="background:var(--success)">${ic('check',18)}</div>
+    <div class="tx-body"><div class="t1"><span>دفعة سداد</span></div><div class="t2">${p.date}${p.note?' · '+escapeHtml(p.note):''}</div></div>
+    <div class="tx-amt pos">+${fmtNum(p.amount)}</div>
+   </div>`).join(''):emptyState('لا توجد دفعات مسجلة بعد')}</div>
+ `);
+
+ document.getElementById('btnEditDebtor').addEventListener('click', ()=>openDebtorForm(debtor));
+ document.getElementById('btnDelDebtor').addEventListener('click', async ()=>{
+  if(!confirm('حذف هذا المدين وكل سجل دفعاته؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+  await deleteDebtorCascade(debtorId);
+  closeModal(); render(); toast('تم الحذف');
+ });
+ document.getElementById('btnAddPayment').addEventListener('click', ()=>{
+  document.getElementById('addPaymentForm').innerHTML=`
+   <div class="field"><label>المبلغ المسدد</label><input type="number" data-amount id="payAmount" inputmode="decimal"></div>
+   ${dateFieldHtml('تاريخ الدفعة','payDate',todayStr())}
+   <div class="field"><label>ملاحظة (اختياري)</label><input type="text" id="payNote"></div>
+   <div class="toggle-row" style="padding:6px 0;">
+    <div><div class="lbl" style="font-size:13px;">إضافة هذا المبلغ لرصيد الاحتياط تلقائيًا</div></div>
+    <label class="switch"><input type="checkbox" id="payToReserve" checked><span class="track"></span></label>
+   </div>
+   <button class="btn btn-primary btn-sm" id="btnSavePayment" style="width:100%;">حفظ الدفعة</button>
+  `;
+  wireAmountInput(document.getElementById('payAmount'));
+  document.getElementById('btnSavePayment').addEventListener('click', async ()=>{
+   const amount=parseAmount(document.getElementById('payAmount').value);
+   if(!amount||amount<=0){ toast('أدخل مبلغًا صحيحًا'); return; }
+   const date=document.getElementById('payDate').value||todayStr();
+   const note=document.getElementById('payNote').value.trim();
+   const toReserve=document.getElementById('payToReserve').checked;
+   const rec={debtorId, date, amount, note};
+   if(toReserve){
+    const reserveId=await DBX.add('reserveTx',{type:'deposit',amount,date,source:'تحصيل دين',note:'من '+debtor.name+(note?' - '+note:'')});
+    rec.linkedReserveTxId=reserveId;
+   }
+   await DBX.add('debtPayments', rec);
+   toast('تمت إضافة الدفعة');
+   openDebtorDetail(debtorId);
+  });
+ });
+ document.querySelectorAll('[data-pay-id]').forEach(row=>row.addEventListener('click', ()=>{
+  const p=payments.find(x=>x.id===Number(row.dataset.payId));
+  openDebtPaymentEdit(debtor, p);
+ }));
+}
+function openDebtPaymentEdit(debtor, p){
+ openModal(`
+  <div class="sheet-handle"></div>
+  <div class="sheet-header"><h3>تعديل الدفعة</h3><button class="icon-btn" data-close>${ic('close',18)}</button></div>
+  <div class="field"><label>المبلغ</label><input type="number" data-amount id="epAmount" value="${p.amount}" inputmode="decimal"></div>
+  ${dateFieldHtml('التاريخ','epDate',p.date)}
+  <div class="field"><label>ملاحظة</label><input type="text" id="epNote" value="${escapeHtml(p.note||'')}"></div>
+  ${p.linkedReserveTxId?`<div class="info-banner">${ic('info',16)}<div>هذه الدفعة مرتبطة بإيداع برصيد الاحتياط، أي تعديل أو حذف هنا سينعكس هناك تلقائيًا.</div></div>`:''}
+  <div class="btn-block-row">
+   <button class="btn btn-danger btn-icon" id="epDel">${ic('trash',18)}</button>
+   <button class="btn btn-primary" id="epSave">حفظ</button>
+  </div>
+ `);
+ document.getElementById('epSave').addEventListener('click', async ()=>{
+  const amount=parseAmount(document.getElementById('epAmount').value); if(!amount||amount<=0){toast('أدخل مبلغًا صحيحًا');return;}
+  const date=document.getElementById('epDate').value||p.date;
+  const note=document.getElementById('epNote').value.trim();
+  await DBX.put('debtPayments',{...p,amount,date,note});
+  if(p.linkedReserveTxId){
+   const rtx=await DBX.get('reserveTx', p.linkedReserveTxId);
+   if(rtx) await DBX.put('reserveTx',{...rtx,amount,date,note:'من '+debtor.name+(note?' - '+note:'')});
+  }
+  toast('تم الحفظ');
+  openDebtorDetail(debtor.id);
+ });
+ document.getElementById('epDel').addEventListener('click', async ()=>{
+  if(!confirm('حذف هذه الدفعة؟')) return;
+  if(p.linkedReserveTxId) await DBX.del('reserveTx', p.linkedReserveTxId);
+  await DBX.del('debtPayments', p.id);
+  toast('تم الحذف');
+  openDebtorDetail(debtor.id);
+ });
+}
+
 /* ==================== التحليلات والإحصائيات ==================== */
 async function renderAnalytics(){
  if(!state.ana) state.ana={mode:'month', month:currentMonthKey(), year:new Date().getFullYear(), from:'', to:''};
@@ -1625,13 +1851,15 @@ function openSearch(){
 async function runGlobalSearch(term){
  const box=document.getElementById('globalSearchResults');
  if(!term){ box.innerHTML=''; return; }
- const [exps,rtx,htx,pays]=await Promise.all([DBX.all('expenses'),DBX.all('reserveTx'),DBX.all('healthTx'),DBX.all('homePayments')]);
+ const [exps,rtx,htx,pays,debtors,debtPays]=await Promise.all([DBX.all('expenses'),DBX.all('reserveTx'),DBX.all('healthTx'),DBX.all('homePayments'),DBX.all('debtors'),DBX.all('debtPayments')]);
  const match=s=>(s==null?'':String(s)).includes(term);
  const results=[];
  exps.forEach(e=>{ const cat=catInfo(e.category); if(match(e.note)||match(cat.label)||match(e.amount)||match(e.date)) results.push({kind:'مصروف',label:cat.label,amount:-e.amount,date:e.date,note:e.note}); });
  rtx.forEach(t=>{ if(match(t.note)||match(t.source)||match(t.reason)||match(t.amount)||match(t.date)) results.push({kind:'احتياط',label:t.type==='deposit'?(t.source||'إضافة'):(t.reason||'سحب'),amount:t.type==='deposit'?t.amount:-t.amount,date:t.date,note:t.note}); });
  htx.forEach(t=>{ if(match(t.note)||match(t.amount)||match(t.date)) results.push({kind:'صندوق صحي',label:t.type==='withdrawal'?'سحب':'إضافة تلقائية',amount:t.type==='withdrawal'?-t.amount:t.amount,date:t.date,note:t.note}); });
  pays.forEach(p=>{ if(match(p.note)||match(p.amount)||match(p.date)) results.push({kind:'قسط بيت',label:'دفعة',amount:-p.amount,date:p.date,note:p.note}); });
+ debtors.forEach(d=>{ if(match(d.name)||match(d.note)||match(d.totalAmount)||match(d.debtDate)) results.push({kind:'دين',label:d.name,amount:d.totalAmount,date:d.debtDate,note:d.note}); });
+ debtPays.forEach(p=>{ const debtor=debtors.find(d=>d.id===p.debtorId); if(match(p.note)||match(p.amount)||match(p.date)) results.push({kind:'دفعة دين',label:debtor?debtor.name:'',amount:p.amount,date:p.date,note:p.note}); });
  results.sort((a,b)=>b.date.localeCompare(a.date));
  box.innerHTML=results.length?`<div class="tx-list">${results.map(r=>`
   <div class="tx-item">
@@ -1789,7 +2017,7 @@ function openPinSetup(){
 function blobToBase64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); }); }
 async function base64ToBlob(dataUrl){ const r=await fetch(dataUrl); return r.blob(); }
 async function exportBackup(){
- const stores=['expenses','income','reserveTx','healthTx','homeMeta','homePayments','settings'];
+ const stores=['expenses','income','reserveTx','healthTx','homeMeta','homePayments','settings','debtors','debtPayments'];
  const data={};
  for(const s of stores) data[s]=await DBX.all(s);
  const docs=await DBX.all('homeDocs');
@@ -1808,9 +2036,9 @@ async function importBackupFile(e){
   const text=await file.text();
   const parsed=JSON.parse(text);
   const data=parsed.data||parsed;
-  const stores=['expenses','income','reserveTx','healthTx','homeMeta','homePayments','settings','homeDocs'];
+  const stores=['expenses','income','reserveTx','healthTx','homeMeta','homePayments','settings','homeDocs','debtors','debtPayments'];
   for(const s of stores) await DBX.clear(s);
-  for(const s of ['expenses','income','reserveTx','healthTx','homeMeta','homePayments','settings']){
+  for(const s of ['expenses','income','reserveTx','healthTx','homeMeta','homePayments','settings','debtors','debtPayments']){
    if(data[s]) for(const rec of data[s]) await DBX.put(s,rec);
   }
   if(data.homeDocs){
@@ -1908,14 +2136,15 @@ function buildWorkbookXlsxBlob(sheets){
  return makeZipBlob(files);
 }
 async function exportExcelReport(){
- const [expenses,incomeRows,reserveTx,healthTx,homePayments,homeMeta]=await Promise.all([
-  DBX.all('expenses'), DBX.all('income'), DBX.all('reserveTx'), DBX.all('healthTx'), DBX.all('homePayments'), DBX.get('homeMeta','meta')
+ const [expenses,incomeRows,reserveTx,healthTx,homePayments,homeMeta,debtors,debtPayments]=await Promise.all([
+  DBX.all('expenses'), DBX.all('income'), DBX.all('reserveTx'), DBX.all('healthTx'), DBX.all('homePayments'), DBX.get('homeMeta','meta'), DBX.all('debtors'), DBX.all('debtPayments')
  ]);
  expenses.sort((a,b)=>a.date.localeCompare(b.date));
  incomeRows.sort((a,b)=>a.month.localeCompare(b.month));
  reserveTx.sort((a,b)=>a.date.localeCompare(b.date));
  healthTx.sort((a,b)=>a.date.localeCompare(b.date));
  homePayments.sort((a,b)=>a.date.localeCompare(b.date));
+ debtPayments.sort((a,b)=>a.date.localeCompare(b.date));
 
  const mk=currentMonthKey();
  const curIncome=(incomeRows.find(r=>r.month===mk)||{}).amount||0;
@@ -1943,6 +2172,14 @@ async function exportExcelReport(){
  const reserveRows=[['التاريخ','النوع','المبلغ','المصدر / السبب','ملاحظة'], ...reserveTx.map(t=>[t.date,t.type==='deposit'?'إضافة':'سحب',t.amount,t.type==='deposit'?(t.source||''):(t.reason||''),t.note||''])];
  const healthRows=[['التاريخ','النوع','المبلغ','ملاحظة'], ...healthTx.map(t=>[t.date,t.type==='withdrawal'?(t.autoFromExpense?'خصم من دكتور وعلاج':'سحب'):'إضافة شهرية تلقائية',t.amount,t.note||''])];
  const homeRows=[['التاريخ','المبلغ','ملاحظة'], ...homePayments.map(p=>[p.date,p.amount,p.note||''])];
+ const debtorsRows=[['الاسم','تاريخ الدين','المبلغ الكلي','المسدد','المتبقي','ملاحظة'], ...debtors.map(d=>{
+  const paid=debtPayments.filter(p=>p.debtorId===d.id).reduce((s,p)=>s+p.amount,0);
+  return [d.name, d.debtDate, d.totalAmount, paid, Math.max(0,d.totalAmount-paid), d.note||''];
+ })];
+ const debtPaymentsRows=[['التاريخ','المدين','المبلغ','ملاحظة'], ...debtPayments.map(p=>{
+  const debtor=debtors.find(d=>d.id===p.debtorId);
+  return [p.date, debtor?debtor.name:'', p.amount, p.note||''];
+ })];
 
  const blob=buildWorkbookXlsxBlob([
   {name:'ملخص', rows:summaryRows},
@@ -1951,6 +2188,8 @@ async function exportExcelReport(){
   {name:'الاحتياط', rows:reserveRows},
   {name:'الصندوق الصحي', rows:healthRows},
   {name:'أقساط البيت', rows:homeRows},
+  {name:'المدينون', rows:debtorsRows},
+  {name:'دفعات الديون', rows:debtPaymentsRows},
  ]);
  const url=URL.createObjectURL(blob);
  const a=document.createElement('a'); a.href=url; a.download='ميزانيتي-تقرير-'+todayStr()+'.xlsx'; document.body.appendChild(a); a.click(); a.remove();
@@ -2006,7 +2245,7 @@ function injectStaticIcons(){
  document.getElementById('btnSearch').innerHTML=ic('search',19);
  document.getElementById('btnSettings').innerHTML=ic('settings',19);
  document.getElementById('fabAdd').innerHTML=ic('plus',24);
- const navIcons={home:'home',expenses:'expenses',reserve:'reserve',health:'health',home_loan:'house',analytics:'analytics'};
+ const navIcons={home:'home',expenses:'expenses',reserve:'reserve',health:'health',home_loan:'house',debts:'debts',analytics:'analytics'};
  qsa('.nav-btn').forEach(btn=>{ btn.querySelector('.ic').innerHTML=ic(navIcons[btn.dataset.view],21); });
 }
 function wireNav(){
@@ -2023,17 +2262,27 @@ function wireNav(){
   else if(state.view==='reserve') openReserveTxForm();
   else if(state.view==='health') openHealthTxForm();
   else if(state.view==='home_loan') openHomePaymentForm();
+  else if(state.view==='debts') openDebtorForm();
  });
 }
-async function boot(){
- await openDB();
+async function initAppData(){
  CURRENCY=await getSetting('currency','د.ع');
  await loadCategories();
- injectStaticIcons();
- wireNav();
  await runMaintenance();
  await checkLock();
  await navigate('home');
+}
+async function boot(){
+ await openDB();
+ injectStaticIcons();
+ wireNav();
+ try{
+  await initAppData();
+ }catch(err){
+  /* حماية من تعارض توقيت نادر مباشرة بعد ترقية قاعدة البيانات لإصدار جديد - إعادة محاولة واحدة كافية */
+  await new Promise(r=>setTimeout(r,80));
+  await initAppData();
+ }
  if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost')){
   navigator.serviceWorker.register('service-worker.js').catch(()=>{});
  }
