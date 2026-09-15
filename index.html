@@ -1532,6 +1532,9 @@ function bindAnalytics(){
  const growth=document.getElementById('anaGrowth'); if(growth) drawDualLines(growth,c.monthLabelsShort,c.rSeries,c.hSeries,colorPrimary(),colorAccent());
  document.getElementById('btnExportPDF')?.addEventListener('click', buildAndPrintReport);
 }
+function isStandaloneMode(){
+ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true;
+}
 async function buildAndPrintReport(){
  const c=state.chartCache;
  const dateStr=new Date().toLocaleDateString('en-GB');
@@ -1554,8 +1557,17 @@ async function buildAndPrintReport(){
   ${c.yoy.map(r=>`<tr><td style="padding:5px;border:1px solid #ccc;">${r.y}</td><td style="padding:5px;border:1px solid #ccc;">${fmtNum(r.inc)}</td><td style="padding:5px;border:1px solid #ccc;">${fmtNum(r.exp)}</td><td style="padding:5px;border:1px solid #ccc;">${fmtNum(r.save)}</td></tr>`).join('')}
  </table>`:''}
  </div>`;
- document.getElementById('printArea').innerHTML=html;
- window.print();
+ if(isStandaloneMode()){
+  const fullHtml=`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>تقرير ميزانيتي</title></head><body style="margin:16px;">${html}<p style="font-family:Cairo,Tahoma,sans-serif;color:#888;font-size:12px;margin-top:24px;">استخدم خيار "طباعة" أو "مشاركة" من المتصفح لحفظ هذه الصفحة كـ PDF.</p></body></html>`;
+  const blob=new Blob([fullHtml],{type:'text/html'});
+  const url=URL.createObjectURL(blob);
+  window.open(url,'_blank');
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  toast('افتح الصفحة الجديدة بالمتصفح، ثم اختر "طباعة" لحفظها PDF');
+ }else{
+  document.getElementById('printArea').innerHTML=html;
+  window.print();
+ }
 }
 
 /* ==================== بحث شامل ==================== */
