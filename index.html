@@ -1942,6 +1942,8 @@ async function openSettings(){
    <button class="btn btn-outline" id="btnExportBackup">${ic('download',17)} تصدير نسخة احتياطية (JSON، لاستعادة البيانات)</button>
    <input type="file" id="importFileInput" accept="application/json" style="display:none;">
    <button class="btn btn-soft" id="btnImportBackup" style="margin-top:8px;">${ic('importIcon',17)} استيراد نسخة احتياطية</button>
+   <input type="file" id="previewBackupInput" accept="application/json" style="display:none;">
+   <button class="btn btn-soft" id="btnPreviewBackup" style="margin-top:8px;">${ic('search',17)} التحقق من محتوى نسخة احتياطية</button>
    <button class="btn btn-outline" id="btnExportExcel" style="margin-top:8px;">${ic('printer',17)} تصدير تقرير Excel (للقراءة والمراجعة)</button>
   </div>
  `);
@@ -1962,6 +1964,8 @@ async function openSettings(){
  document.getElementById('btnExportBackup').addEventListener('click', exportBackup);
  document.getElementById('btnImportBackup').addEventListener('click',()=>document.getElementById('importFileInput').click());
  document.getElementById('importFileInput').addEventListener('change', importBackupFile);
+ document.getElementById('btnPreviewBackup').addEventListener('click',()=>document.getElementById('previewBackupInput').click());
+ document.getElementById('previewBackupInput').addEventListener('change', previewBackupFile);
  document.getElementById('btnExportExcel').addEventListener('click', exportExcelReport);
  document.getElementById('catList').addEventListener('click', async (e)=>{
   const btn=e.target.closest('[data-cat-act]'); if(!btn||btn.disabled) return;
@@ -2057,6 +2061,62 @@ async function importBackupFile(e){
   navigate(state.view);
  }catch(err){
   toast('تعذر قراءة الملف، تأكد أنه نسخة احتياطية صحيحة');
+ }
+}
+function previewRow(label,value){
+ return `<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;">
+  <span style="color:var(--text-muted);">${label}</span><span style="font-weight:700;">${value}</span>
+ </div>`;
+}
+async function previewBackupFile(e){
+ const file=e.target.files[0]; if(!file) return;
+ try{
+  const text=await file.text();
+  const parsed=JSON.parse(text);
+  const data=parsed.data||parsed;
+  const exps=data.expenses||[];
+  const incomeRows=data.income||[];
+  const reserveTx=data.reserveTx||[];
+  const healthTx=data.healthTx||[];
+  const homePayments=data.homePayments||[];
+  const debtors=data.debtors||[];
+  const debtPayments=data.debtPayments||[];
+  const homeDocs=data.homeDocs||[];
+  const settingsRows=data.settings||[];
+
+  const reserveBal=reserveTx.reduce((s,t)=>s+(t.type==='deposit'?t.amount:-t.amount),0);
+  const healthBal=healthTx.reduce((s,t)=>s+(t.type==='withdrawal'?-t.amount:t.amount),0);
+  const totalExpenses=exps.reduce((s,x)=>s+x.amount,0);
+  const homePaid=homePayments.reduce((s,p)=>s+p.amount,0);
+  const totalDebtRemaining=debtors.reduce((s,d)=>{
+   const paid=debtPayments.filter(p=>p.debtorId===d.id).reduce((s2,p)=>s2+p.amount,0);
+   return s+Math.max(0,d.totalAmount-paid);
+  },0);
+  const customCatsCount=(settingsRows.find(s=>s.key==='allCategories')||{value:[]}).value.length;
+  const exportedAt=parsed.exportedAt?new Date(parsed.exportedAt).toLocaleString('en-GB'):'غير معروف';
+
+  openModal(`
+   <div class="sheet-handle"></div>
+   <div class="sheet-header"><h3>معاينة النسخة الاحتياطية</h3><button class="icon-btn" data-close>${ic('close',18)}</button></div>
+   <div class="info-banner">${ic('info',16)}<div>هذي معاينة قراءة فقط — ما راح تُغيَّر أو تُستبدل أي بيانات موجودة حاليًا بالتطبيق. قارن هذي الأرقام بالأرصدة اللي تشوفها بالتطبيق للتأكد إن النسخة صحيحة.</div></div>
+   <div class="card">
+    ${previewRow('تاريخ التصدير', exportedAt)}
+    ${previewRow('عدد عمليات المصروفات', exps.length)}
+    ${previewRow('إجمالي المصروفات بالملف', fmtNum(totalExpenses))}
+    ${previewRow('عدد أشهر الدخل المسجلة', incomeRows.length)}
+    ${previewRow('رصيد الاحتياط بالملف', fmtNum(reserveBal))}
+    ${previewRow('رصيد الصندوق الصحي بالملف', fmtNum(healthBal))}
+    ${previewRow('عدد دفعات أقساط البيت', homePayments.length)}
+    ${previewRow('إجمالي المسدد من البيت', fmtNum(homePaid))}
+    ${previewRow('عدد المستندات المرفقة', homeDocs.length)}
+    ${previewRow('عدد المدينين', debtors.length)}
+    ${previewRow('إجمالي الديون المتبقية بالملف', fmtNum(totalDebtRemaining))}
+    ${previewRow('عدد التصنيفات المخصصة', customCatsCount)}
+   </div>
+   <div class="tag-input-hint">إذا هذي الأرقام تطابق تقريبًا وضعك الحالي بالتطبيق (نفس عدد العمليات تقريبًا ونفس الأرصدة)، فهذا يعني النسخة الاحتياطية سليمة وكاملة.</div>
+  `);
+ }catch(err){
+  toast('تعذر قراءة الملف، تأكد أنه ملف نسخة احتياطية صحيح (JSON)');
  }
 }
 
